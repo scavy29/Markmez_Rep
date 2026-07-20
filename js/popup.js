@@ -1,6 +1,9 @@
 let activeTab = null;
 
 async function init() {
+  const settings = await Store.getSettings();
+  document.documentElement.style.setProperty("--accent", settings.accent);
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   activeTab = tab;
 

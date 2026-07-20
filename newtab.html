@@ -18,6 +18,7 @@
       </div>
       <button class="btn" id="importBtn">Import from Chrome</button>
       <button class="btn btn-primary" id="addBoardBtn">+ New Board</button>
+      <button class="btn icon-btn" id="settingsBtn" title="Theme &amp; wallpaper">⚙</button>
     </div>
 
     <div id="boards" class="boards"></div>
@@ -33,6 +34,36 @@
       <div id="importList"></div>
       <div class="modal-actions">
         <button class="btn" id="importCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsOverlay" class="overlay hidden">
+    <div class="modal">
+      <h3>Theme &amp; wallpaper</h3>
+
+      <div class="settings-section">
+        <div class="settings-label">Accent color</div>
+        <div class="swatch-row" id="accentSwatches"></div>
+        <label class="custom-color-row">
+          Custom
+          <input type="color" id="accentCustom" />
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">Wallpaper</div>
+        <div class="swatch-row" id="wallpaperSwatches"></div>
+        <div class="wallpaper-actions">
+          <button class="btn" id="uploadWallpaperBtn">Upload image</button>
+          <button class="btn" id="clearWallpaperBtn">None</button>
+          <input type="file" id="wallpaperFile" accept="image/*" class="hidden" />
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="settingsDone">Done</button>
       </div>
     </div>
   </div>

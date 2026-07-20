@@ -3,7 +3,7 @@
   "name": "Boardmarks",
   "version": "1.0.0",
   "description": "Organize your bookmarks into visual boards, right from your new tab.",
-  "permissions": ["storage", "bookmarks", "tabs"],
+  "permissions": ["storage", "unlimitedStorage", "bookmarks", "tabs"],
   "chrome_url_overrides": {
     "newtab": "newtab.html"
   },
