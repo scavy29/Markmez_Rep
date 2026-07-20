@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>New Tab</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div class="brand"><span class="dot"></span>Boardmarks</div>
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input id="search" type="text" placeholder="Search your bookmarks…" />
+      </div>
+      <button class="btn" id="importBtn">Import from Chrome</button>
+      <button class="btn btn-primary" id="addBoardBtn">+ New Board</button>
+    </div>
+
+    <div id="boards" class="boards"></div>
+    <div id="emptyState" class="empty-state hidden">
+      No boards yet — create one, or import your existing Chrome bookmarks to get started.
+    </div>
+  </div>
+
+  <!-- Import modal -->
+  <div id="importOverlay" class="overlay hidden">
+    <div class="modal">
+      <h3>Import from Chrome bookmarks</h3>
+      <div id="importList"></div>
+      <div class="modal-actions">
+        <button class="btn" id="importCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/store.js"></script>
+  <script src="js/newtab.js"></script>
+</body>
+</html>
