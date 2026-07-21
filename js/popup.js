@@ -11,16 +11,20 @@ async function init() {
   document.getElementById("ctUrl").textContent = tab.url;
   document.getElementById("ctIcon").src = Store.faviconFor(tab.url);
 
-  const data = await Store.getData();
+  const spaces = await Store.listSpaces();
+  const activeSpace = spaces.find((s) => s.active) || spaces[0];
+  document.getElementById("spaceIndicator").textContent = activeSpace ? `Space: ${activeSpace.name}` : "";
+
+  const boards = await Store.getActiveSpaceBoards();
   const select = document.getElementById("boardSelect");
   select.innerHTML = "";
 
-  if (data.boards.length === 0) {
+  if (boards.length === 0) {
     const opt = document.createElement("option");
     opt.textContent = "No boards yet — creating 'General'";
     select.appendChild(opt);
   } else {
-    for (const b of data.boards) {
+    for (const b of boards) {
       const opt = document.createElement("option");
       opt.value = b.id;
       opt.textContent = `${b.name} (${b.bookmarks.length})`;
@@ -50,10 +54,10 @@ function downscaleImage(dataUrl, maxWidth, maxHeight, quality) {
 document.getElementById("saveBtn").addEventListener("click", async () => {
   const status = document.getElementById("status");
   const select = document.getElementById("boardSelect");
-  let data = await Store.getData();
+  const boards = await Store.getActiveSpaceBoards();
 
   let boardId = select.value;
-  if (data.boards.length === 0) {
+  if (boards.length === 0) {
     const board = await Store.addBoard("General");
     boardId = board.id;
   }

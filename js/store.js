@@ -1,5 +1,10 @@
 // Shared storage layer. Data shape:
-// { boards: [ { id, name, bookmarks: [ { id, title, url } ] } ] }
+// {
+//   spaces: [ { id, name, boards: [ { id, name, icon, color, bookmarks: [ { id, title, url } ] } ] } ],
+//   activeSpaceId
+// }
+// Older installs may have the legacy flat shape { boards: [...] } — getData()
+// migrates that into a single "My Boards" space the first time it's read.
 
 function hexToRgba(hex, alpha) {
   const m = hex.replace("#", "");
@@ -34,12 +39,54 @@ const Store = {
     const meta = await this.getMeta();
     const area = meta.syncEnabled ? chrome.storage.sync : chrome.storage.local;
     const res = await area.get("boardmarks");
-    if (!res.boardmarks) {
-      const initial = { boards: [] };
-      await area.set({ boardmarks: initial });
-      return initial;
+    let data = res.boardmarks;
+
+    if (!data) {
+      const space = { id: this.uid(), name: "My Boards", boards: [] };
+      data = { spaces: [space], activeSpaceId: space.id };
+      await area.set({ boardmarks: data });
+      return data;
     }
-    return res.boardmarks;
+
+    // Migrate legacy flat-boards shape into a single default space.
+    if (!Array.isArray(data.spaces)) {
+      const legacyBoards = Array.isArray(data.boards) ? data.boards : [];
+      const space = { id: this.uid(), name: "My Boards", boards: legacyBoards };
+      data = { spaces: [space], activeSpaceId: space.id };
+      await area.set({ boardmarks: data });
+      return data;
+    }
+
+    if (data.spaces.length === 0) {
+      const space = { id: this.uid(), name: "My Boards", boards: [] };
+      data.spaces = [space];
+      data.activeSpaceId = space.id;
+      await area.set({ boardmarks: data });
+      return data;
+    }
+
+    if (!data.activeSpaceId || !data.spaces.find((s) => s.id === data.activeSpaceId)) {
+      data.activeSpaceId = data.spaces[0].id;
+      await area.set({ boardmarks: data });
+    }
+
+    return data;
+  },
+
+  // Pure lookup: returns the active space object from an already-fetched
+  // data object (falls back to the first space if the id is somehow stale).
+  getActiveSpace(data) {
+    let space = data.spaces.find((s) => s.id === data.activeSpaceId);
+    if (!space) {
+      space = data.spaces[0];
+      data.activeSpaceId = space.id;
+    }
+    return space;
+  },
+
+  async getActiveSpaceBoards() {
+    const data = await this.getData();
+    return this.getActiveSpace(data).boards;
   },
 
   async setData(data) {
@@ -54,7 +101,7 @@ const Store = {
         await chrome.storage.local.set({ boardmarks: data });
         await this.setMeta({ syncEnabled: false });
         const quotaErr = new Error(
-          "Chrome's sync storage is full (it caps synced data at 100KB total, 8KB per board). " +
+          "Chrome's sync storage is full (it caps synced data at 100KB total, 8KB per item). " +
             "Your latest change was saved locally instead, and sync has been turned off."
         );
         quotaErr.code = "SYNC_QUOTA_EXCEEDED";
@@ -71,14 +118,14 @@ const Store = {
 
     if (enabled) {
       const localRes = await chrome.storage.local.get("boardmarks");
-      const current = localRes.boardmarks || { boards: [] };
+      const current = localRes.boardmarks || { spaces: [], activeSpaceId: null };
       try {
         await chrome.storage.sync.set({ boardmarks: current });
       } catch (err) {
         return {
           ok: false,
           error:
-            "Your current boards are too large for Chrome sync (it caps synced data at 100KB total, 8KB per board). " +
+            "Your current boards are too large for Chrome sync (it caps synced data at 100KB total, 8KB per item). " +
             "Try trimming some bookmarks and try again.",
         };
       }
@@ -91,6 +138,57 @@ const Store = {
       }
       await this.setMeta({ syncEnabled: false });
       return { ok: true };
+    }
+  },
+
+  // ---------- Spaces ----------
+
+  async listSpaces() {
+    const data = await this.getData();
+    return data.spaces.map((s) => ({
+      id: s.id,
+      name: s.name,
+      boardCount: s.boards.length,
+      active: s.id === data.activeSpaceId,
+    }));
+  },
+
+  async addSpace(name) {
+    const data = await this.getData();
+    const space = { id: this.uid(), name: name || "New Space", boards: [] };
+    data.spaces.push(space);
+    data.activeSpaceId = space.id;
+    await this.setData(data);
+    return space;
+  },
+
+  async renameSpace(spaceId, name) {
+    const data = await this.getData();
+    const s = data.spaces.find((x) => x.id === spaceId);
+    if (s) s.name = name || "Untitled space";
+    await this.setData(data);
+  },
+
+  async deleteSpace(spaceId) {
+    const data = await this.getData();
+    if (data.spaces.length <= 1) {
+      throw new Error("You need at least one space — create another before deleting this one.");
+    }
+    const target = data.spaces.find((s) => s.id === spaceId);
+    data.spaces = data.spaces.filter((s) => s.id !== spaceId);
+    if (data.activeSpaceId === spaceId) data.activeSpaceId = data.spaces[0].id;
+    await this.setData(data);
+    if (target) {
+      const ids = target.boards.flatMap((b) => b.bookmarks.map((bm) => bm.id));
+      await this.deleteThumbnails(ids);
+    }
+  },
+
+  async setActiveSpace(spaceId) {
+    const data = await this.getData();
+    if (data.spaces.find((s) => s.id === spaceId)) {
+      data.activeSpaceId = spaceId;
+      await this.setData(data);
     }
   },
 
@@ -132,7 +230,8 @@ const Store = {
 
   DEFAULT_SETTINGS: {
     accent: "#6d6af7",
-    wallpaper: { type: "none", value: "" }, // type: none | color | gradient | image
+    wallpaper: { type: "none", value: "" }, // type: none | color | gradient | image | live
+    grain: true,
   },
 
   async getSettings() {
@@ -155,11 +254,22 @@ const Store = {
 
     const body = document.body;
     if (!body) return;
+
+    document.body.classList.toggle("grain-off", settings.grain === false);
+
+    const liveLayer = document.getElementById("liveWallpaperLayer");
     const wp = settings.wallpaper || { type: "none" };
+
+    if (liveLayer) liveLayer.classList.toggle("hidden", wp.type !== "live");
+
     if (wp.type === "none" || !wp.value) {
       body.style.backgroundImage = "";
       body.style.backgroundColor = "";
       body.classList.remove("has-wallpaper");
+    } else if (wp.type === "live") {
+      body.style.backgroundImage = "";
+      body.style.backgroundColor = "transparent";
+      body.classList.add("has-wallpaper");
     } else if (wp.type === "color") {
       body.style.backgroundImage = "";
       body.style.backgroundColor = wp.value;
@@ -181,26 +291,31 @@ const Store = {
     const thumbnails = await this.getThumbnails();
     return {
       app: "boardmarks",
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
-      boards: data.boards,
+      spaces: data.spaces,
+      activeSpaceId: data.activeSpaceId,
       settings,
       thumbnails,
     };
   },
 
-  // mode: 'merge' appends imported boards (with fresh ids) alongside existing ones.
-  // mode: 'replace' wipes current boards (and settings, if present in the file) and uses the import as-is.
+  // mode: 'merge' adds each imported space as a brand-new space (fresh ids) alongside existing ones.
+  // mode: 'replace' wipes all current spaces (and settings, if present in the file) and uses the import as-is.
+  // Understands both the current { spaces: [...] } backup shape and the older { boards: [...] } shape.
   async importAll(parsed, mode) {
-    if (!parsed || !Array.isArray(parsed.boards)) {
+    if (!parsed || (!Array.isArray(parsed.spaces) && !Array.isArray(parsed.boards))) {
       throw new Error("This doesn't look like a Boardmarks backup file.");
     }
     const data = await this.getData();
     const idMap = {}; // old bookmark id -> new bookmark id (only used when ids are regenerated)
+    const isSpaceShaped = Array.isArray(parsed.spaces);
 
     const sanitizeBoard = (b, keepIds) => ({
       id: keepIds && b.id ? b.id : this.uid(),
       name: typeof b.name === "string" && b.name.trim() ? b.name : "Untitled",
+      icon: typeof b.icon === "string" ? b.icon : "",
+      color: typeof b.color === "string" ? b.color : "",
       bookmarks: Array.isArray(b.bookmarks)
         ? b.bookmarks
             .filter((bm) => bm && typeof bm.url === "string")
@@ -216,25 +331,42 @@ const Store = {
         : [],
     });
 
+    const sanitizeSpace = (s, keepIds) => ({
+      id: keepIds && s.id ? s.id : this.uid(),
+      name: typeof s.name === "string" && s.name.trim() ? s.name : "Imported",
+      boards: Array.isArray(s.boards) ? s.boards.map((b) => sanitizeBoard(b, keepIds)) : [],
+    });
+
+    const incomingSpaces = isSpaceShaped
+      ? parsed.spaces
+      : [{ id: null, name: "Imported backup", boards: parsed.boards }];
     const importedThumbs = parsed.thumbnails && typeof parsed.thumbnails === "object" ? parsed.thumbnails : {};
 
     if (mode === "replace") {
-      data.boards = parsed.boards.map((b) => sanitizeBoard(b, true));
+      const keepIds = isSpaceShaped; // a synthetic wrapper for legacy backups always gets fresh ids
+      data.spaces = incomingSpaces.map((s) => sanitizeSpace(s, keepIds));
+      if (data.spaces.length === 0) {
+        data.spaces = [{ id: this.uid(), name: "My Boards", boards: [] }];
+      }
+      data.activeSpaceId =
+        keepIds && parsed.activeSpaceId && data.spaces.find((s) => s.id === parsed.activeSpaceId)
+          ? parsed.activeSpaceId
+          : data.spaces[0].id;
       await this.setData(data);
       if (parsed.settings) {
         await this.setSettings({ ...this.DEFAULT_SETTINGS, ...parsed.settings });
       }
-      // Replace wipes existing boards entirely, so drop any thumbnails that
+      // Replace wipes existing spaces entirely, so drop any thumbnails that
       // no longer correspond to a bookmark rather than leaving orphans.
-      const validIds = new Set(data.boards.flatMap((b) => b.bookmarks.map((bm) => bm.id)));
+      const validIds = new Set(data.spaces.flatMap((s) => s.boards.flatMap((b) => b.bookmarks.map((bm) => bm.id))));
       const nextThumbs = {};
       for (const [id, url] of Object.entries(importedThumbs)) {
         if (validIds.has(id)) nextThumbs[id] = url;
       }
       await chrome.storage.local.set({ [this.THUMB_KEY]: nextThumbs });
     } else {
-      const imported = parsed.boards.map((b) => sanitizeBoard(b, false));
-      data.boards = data.boards.concat(imported);
+      const newSpaces = incomingSpaces.map((s) => sanitizeSpace(s, false));
+      data.spaces = data.spaces.concat(newSpaces);
       await this.setData(data);
       // Carry thumbnails over under their newly-generated bookmark ids.
       const existingThumbs = await this.getThumbnails();
@@ -252,41 +384,56 @@ const Store = {
 
   async addBoard(name) {
     const data = await this.getData();
-    const board = { id: this.uid(), name: name || "New Board", bookmarks: [] };
-    data.boards.push(board);
+    const space = this.getActiveSpace(data);
+    const board = { id: this.uid(), name: name || "New Board", icon: "", color: "", bookmarks: [] };
+    space.boards.push(board);
     await this.setData(data);
     return board;
   },
 
   async renameBoard(boardId, name) {
     const data = await this.getData();
-    const b = data.boards.find((x) => x.id === boardId);
+    const space = this.getActiveSpace(data);
+    const b = space.boards.find((x) => x.id === boardId);
     if (b) b.name = name;
+    await this.setData(data);
+  },
+
+  async setBoardAppearance(boardId, { icon, color } = {}) {
+    const data = await this.getData();
+    const space = this.getActiveSpace(data);
+    const b = space.boards.find((x) => x.id === boardId);
+    if (!b) return;
+    if (icon !== undefined) b.icon = icon;
+    if (color !== undefined) b.color = color;
     await this.setData(data);
   },
 
   async reorderBoards(draggedId, targetId) {
     const data = await this.getData();
-    const fromIndex = data.boards.findIndex((x) => x.id === draggedId);
+    const space = this.getActiveSpace(data);
+    const fromIndex = space.boards.findIndex((x) => x.id === draggedId);
     if (fromIndex === -1) return;
-    const [moved] = data.boards.splice(fromIndex, 1);
-    let toIndex = targetId ? data.boards.findIndex((x) => x.id === targetId) : data.boards.length;
-    if (toIndex === -1) toIndex = data.boards.length;
-    data.boards.splice(toIndex, 0, moved);
+    const [moved] = space.boards.splice(fromIndex, 1);
+    let toIndex = targetId ? space.boards.findIndex((x) => x.id === targetId) : space.boards.length;
+    if (toIndex === -1) toIndex = space.boards.length;
+    space.boards.splice(toIndex, 0, moved);
     await this.setData(data);
   },
 
   async deleteBoard(boardId) {
     const data = await this.getData();
-    const board = data.boards.find((x) => x.id === boardId);
-    data.boards = data.boards.filter((x) => x.id !== boardId);
+    const space = this.getActiveSpace(data);
+    const board = space.boards.find((x) => x.id === boardId);
+    space.boards = space.boards.filter((x) => x.id !== boardId);
     await this.setData(data);
     if (board) await this.deleteThumbnails(board.bookmarks.map((bm) => bm.id));
   },
 
   async addBookmark(boardId, { title, url }) {
     const data = await this.getData();
-    const b = data.boards.find((x) => x.id === boardId);
+    const space = this.getActiveSpace(data);
+    const b = space.boards.find((x) => x.id === boardId);
     if (!b) return null;
     const bookmark = { id: this.uid(), title: title || url, url };
     b.bookmarks.push(bookmark);
@@ -296,8 +443,9 @@ const Store = {
 
   async moveBookmarkToPosition(fromBoardId, toBoardId, bookmarkId, toIndex) {
     const data = await this.getData();
-    const from = data.boards.find((x) => x.id === fromBoardId);
-    const to = data.boards.find((x) => x.id === toBoardId);
+    const space = this.getActiveSpace(data);
+    const from = space.boards.find((x) => x.id === fromBoardId);
+    const to = space.boards.find((x) => x.id === toBoardId);
     if (!from || !to) return;
     const idx = from.bookmarks.findIndex((x) => x.id === bookmarkId);
     if (idx === -1) return;
@@ -312,7 +460,8 @@ const Store = {
 
   async removeBookmark(boardId, bookmarkId) {
     const data = await this.getData();
-    const b = data.boards.find((x) => x.id === boardId);
+    const space = this.getActiveSpace(data);
+    const b = space.boards.find((x) => x.id === boardId);
     if (!b) return;
     b.bookmarks = b.bookmarks.filter((x) => x.id !== bookmarkId);
     await this.setData(data);
@@ -322,8 +471,9 @@ const Store = {
   async moveBookmark(fromBoardId, toBoardId, bookmarkId) {
     if (fromBoardId === toBoardId) return;
     const data = await this.getData();
-    const from = data.boards.find((x) => x.id === fromBoardId);
-    const to = data.boards.find((x) => x.id === toBoardId);
+    const space = this.getActiveSpace(data);
+    const from = space.boards.find((x) => x.id === fromBoardId);
+    const to = space.boards.find((x) => x.id === toBoardId);
     if (!from || !to) return;
     const idx = from.bookmarks.findIndex((x) => x.id === bookmarkId);
     if (idx === -1) return;

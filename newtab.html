@@ -6,6 +6,13 @@
 <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+  <div id="liveWallpaperLayer" class="live-wallpaper hidden" aria-hidden="true">
+    <div class="lw-blob lw-blob-a"></div>
+    <div class="lw-blob lw-blob-b"></div>
+    <div class="lw-blob lw-blob-c"></div>
+  </div>
+  <div class="grain-layer" aria-hidden="true"></div>
+
   <div class="page">
     <div class="topbar">
       <div class="brand"><span class="dot"></span>Boardmarks</div>
@@ -15,6 +22,7 @@
           <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
         <input id="search" type="text" placeholder="Search your bookmarks…" />
+        <kbd class="kbd-hint">Ctrl K</kbd>
       </div>
       <button class="btn" id="importBtn">Import from Chrome</button>
       <button class="btn" id="exportBtn">Export</button>
@@ -23,9 +31,51 @@
       <button class="btn icon-btn" id="settingsBtn" title="Theme &amp; wallpaper">⚙</button>
     </div>
 
+    <div class="spacebar">
+      <select id="spaceSelect"></select>
+      <button class="btn icon-btn" id="renameSpaceBtn" title="Rename this space">✎</button>
+      <button class="btn icon-btn" id="deleteSpaceBtn" title="Delete this space">🗑</button>
+      <button class="btn" id="addSpaceBtn">+ New space</button>
+    </div>
+
     <div id="boards" class="boards"></div>
     <div id="emptyState" class="empty-state hidden">
       No boards yet — create one, or import your existing Chrome bookmarks to get started.
+    </div>
+  </div>
+
+  <!-- Board icon & color modal -->
+  <div id="boardAppearanceOverlay" class="overlay hidden">
+    <div class="modal">
+      <h3>Board icon &amp; color</h3>
+
+      <div class="settings-section">
+        <div class="settings-label">Icon</div>
+        <div class="swatch-row" id="boardIconPresets"></div>
+        <label class="custom-color-row">
+          Custom
+          <input type="text" id="boardIconCustom" maxlength="4" placeholder="🚀" style="width:56px;text-align:center;" />
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">Color</div>
+        <div class="swatch-row" id="boardColorPresets"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="boardAppearanceDone">Done</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Command palette -->
+  <div id="paletteOverlay" class="overlay hidden">
+    <div class="modal palette-modal">
+      <input type="text" id="paletteInput" placeholder="Jump to a space, board, or bookmark…" autocomplete="off" />
+      <div id="paletteResults" class="palette-results"></div>
+      <div class="palette-hint">↑↓ to navigate · Enter to open · Esc to close</div>
     </div>
   </div>
 
@@ -48,7 +98,7 @@
       <h3>Restore backup</h3>
       <p id="importJsonSummary" class="settings-label" style="text-transform:none;letter-spacing:normal;"></p>
       <div class="modal-actions" style="justify-content: flex-start; flex-wrap: wrap;">
-        <button class="btn btn-primary" id="importJsonMerge">Merge with current boards</button>
+        <button class="btn btn-primary" id="importJsonMerge">Add as new space(s)</button>
         <button class="btn" id="importJsonReplace">Replace everything</button>
         <button class="btn" id="importJsonCancel">Cancel</button>
       </div>
@@ -77,6 +127,14 @@
           <button class="btn" id="clearWallpaperBtn">None</button>
           <input type="file" id="wallpaperFile" accept="image/*" class="hidden" />
         </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">Effects</div>
+        <label class="sync-toggle-row">
+          <input type="checkbox" id="grainToggle" />
+          <span>Subtle film-grain texture</span>
+        </label>
       </div>
 
       <div class="settings-section">
