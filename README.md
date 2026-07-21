@@ -8,15 +8,28 @@ saving the current tab.
 - **Boards**: create, rename, delete, and drag to reorder (grab the ⠿ handle)
 - **Import**: pull in your existing Chrome bookmark folders as boards
 - **Search**: filter across all boards instantly
-- **Drag & drop**: move a bookmark from one board to another
+- **Drag & drop**: reorder bookmarks within a board, or drag one onto another
+  board to move it there
 - **Quick save**: click the toolbar icon to save the current tab to any board
 - **Theme & wallpaper** (⚙ button): pick an accent color (presets or a custom
   swatch) and a wallpaper — gradient presets, a solid color, or upload your
   own image. Boards get a frosted-glass look automatically when a wallpaper
   is active, so text stays readable.
-- Everything is stored locally via `chrome.storage.local` — no account, no
-  server, no tracking. (Wallpaper images use the `unlimitedStorage`
-  permission so a photo won't hit the default quota.)
+- **Export / restore backup**: download all your boards, bookmarks, and
+  theme settings as a JSON file, and restore from one later — merge it into
+  your current boards or replace everything outright (with a confirmation
+  either way).
+- **Sync across devices** (Settings → Sync across devices): toggle on to
+  store your boards & bookmarks in `chrome.storage.sync` instead of
+  `chrome.storage.local`, so Chrome copies them to your other signed-in
+  devices automatically — no account or server of ours involved. Chrome
+  caps sync storage at ~100KB total / ~8KB per board, so wallpaper and
+  theme intentionally stay local-only. If your data ever outgrows that
+  cap, the latest change is saved locally instead and sync turns off
+  automatically, with an explanation — nothing is lost.
+- Everything is stored locally by default via `chrome.storage.local` — no
+  account, no server, no tracking. (Wallpaper images use the
+  `unlimitedStorage` permission so a photo won't hit the default quota.)
 
 ## Install it (Load unpacked)
 1. Unzip this folder somewhere permanent (don't delete it after installing —
@@ -27,10 +40,9 @@ saving the current tab.
 5. Open a new tab — you should see Boardmarks. Pin the extension icon to your
    toolbar for the quick-save popup.
 
-## Notes / next steps you could add yourself
-- Bookmark reordering within a board
-- Export/backup to JSON
-- Sync via `chrome.storage.sync` instead of `local` (Chrome will sync it
-  across your own signed-in devices automatically — no backend needed)
+## Ideas for more
+- Bookmark thumbnails/screenshots instead of favicons
+- Keyboard shortcuts (e.g. a hotkey to open the quick-add row)
+- Multiple named "spaces" of boards you can switch between
 
 This is your codebase — feel free to rip anything out or extend it.

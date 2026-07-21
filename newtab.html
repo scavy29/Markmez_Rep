@@ -17,6 +17,8 @@
         <input id="search" type="text" placeholder="Search your bookmarks…" />
       </div>
       <button class="btn" id="importBtn">Import from Chrome</button>
+      <button class="btn" id="exportBtn">Export</button>
+      <button class="btn" id="importJsonBtn">Restore backup</button>
       <button class="btn btn-primary" id="addBoardBtn">+ New Board</button>
       <button class="btn icon-btn" id="settingsBtn" title="Theme &amp; wallpaper">⚙</button>
     </div>
@@ -34,6 +36,21 @@
       <div id="importList"></div>
       <div class="modal-actions">
         <button class="btn" id="importCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="importJsonFile" accept="application/json,.json" class="hidden" />
+
+  <!-- Import backup confirmation modal -->
+  <div id="importJsonOverlay" class="overlay hidden">
+    <div class="modal">
+      <h3>Restore backup</h3>
+      <p id="importJsonSummary" class="settings-label" style="text-transform:none;letter-spacing:normal;"></p>
+      <div class="modal-actions" style="justify-content: flex-start; flex-wrap: wrap;">
+        <button class="btn btn-primary" id="importJsonMerge">Merge with current boards</button>
+        <button class="btn" id="importJsonReplace">Replace everything</button>
+        <button class="btn" id="importJsonCancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -60,6 +77,19 @@
           <button class="btn" id="clearWallpaperBtn">None</button>
           <input type="file" id="wallpaperFile" accept="image/*" class="hidden" />
         </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">Sync across devices</div>
+        <label class="sync-toggle-row">
+          <input type="checkbox" id="syncToggle" />
+          <span>Sync boards &amp; bookmarks via Chrome sync</span>
+        </label>
+        <p class="settings-hint">
+          Uses your browser's built-in Chrome sync — no account with us, no server.
+          Chrome caps synced data at ~100KB total (~8KB per board), so wallpaper and
+          theme always stay on this device only.
+        </p>
       </div>
 
       <div class="modal-actions">

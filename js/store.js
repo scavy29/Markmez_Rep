@@ -12,18 +12,86 @@ function hexToRgba(hex, alpha) {
 }
 
 const Store = {
+  // Which storage area holds board data (local vs sync) is itself tracked in
+  // local storage, since we need to know where to look *before* we know
+  // where the boards live.
+  META_KEY: "boardmarksMeta",
+
+  async getMeta() {
+    const res = await chrome.storage.local.get(this.META_KEY);
+    return res[this.META_KEY] || { syncEnabled: false };
+  },
+
+  async setMeta(meta) {
+    await chrome.storage.local.set({ [this.META_KEY]: meta });
+  },
+
+  async isSyncEnabled() {
+    return (await this.getMeta()).syncEnabled;
+  },
+
   async getData() {
-    const res = await chrome.storage.local.get("boardmarks");
+    const meta = await this.getMeta();
+    const area = meta.syncEnabled ? chrome.storage.sync : chrome.storage.local;
+    const res = await area.get("boardmarks");
     if (!res.boardmarks) {
       const initial = { boards: [] };
-      await chrome.storage.local.set({ boardmarks: initial });
+      await area.set({ boardmarks: initial });
       return initial;
     }
     return res.boardmarks;
   },
 
   async setData(data) {
-    await chrome.storage.local.set({ boardmarks: data });
+    const meta = await this.getMeta();
+    const area = meta.syncEnabled ? chrome.storage.sync : chrome.storage.local;
+    try {
+      await area.set({ boardmarks: data });
+    } catch (err) {
+      if (meta.syncEnabled) {
+        // Sync rejected the write (almost certainly a quota limit). Save
+        // locally so the change isn't lost, and drop back to local mode.
+        await chrome.storage.local.set({ boardmarks: data });
+        await this.setMeta({ syncEnabled: false });
+        const quotaErr = new Error(
+          "Chrome's sync storage is full (it caps synced data at 100KB total, 8KB per board). " +
+            "Your latest change was saved locally instead, and sync has been turned off."
+        );
+        quotaErr.code = "SYNC_QUOTA_EXCEEDED";
+        throw quotaErr;
+      }
+      throw err;
+    }
+  },
+
+  // Turns sync on/off. Returns { ok: true } or { ok: false, error }.
+  async setSyncEnabled(enabled) {
+    const meta = await this.getMeta();
+    if (meta.syncEnabled === enabled) return { ok: true };
+
+    if (enabled) {
+      const localRes = await chrome.storage.local.get("boardmarks");
+      const current = localRes.boardmarks || { boards: [] };
+      try {
+        await chrome.storage.sync.set({ boardmarks: current });
+      } catch (err) {
+        return {
+          ok: false,
+          error:
+            "Your current boards are too large for Chrome sync (it caps synced data at 100KB total, 8KB per board). " +
+            "Try trimming some bookmarks and try again.",
+        };
+      }
+      await this.setMeta({ syncEnabled: true });
+      return { ok: true };
+    } else {
+      const syncRes = await chrome.storage.sync.get("boardmarks");
+      if (syncRes.boardmarks) {
+        await chrome.storage.local.set({ boardmarks: syncRes.boardmarks });
+      }
+      await this.setMeta({ syncEnabled: false });
+      return { ok: true };
+    }
   },
 
   DEFAULT_SETTINGS: {
@@ -71,6 +139,53 @@ const Store = {
     }
   },
 
+  async exportAll() {
+    const data = await this.getData();
+    const settings = await this.getSettings();
+    return {
+      app: "boardmarks",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      boards: data.boards,
+      settings,
+    };
+  },
+
+  // mode: 'merge' appends imported boards (with fresh ids) alongside existing ones.
+  // mode: 'replace' wipes current boards (and settings, if present in the file) and uses the import as-is.
+  async importAll(parsed, mode) {
+    if (!parsed || !Array.isArray(parsed.boards)) {
+      throw new Error("This doesn't look like a Boardmarks backup file.");
+    }
+    const data = await this.getData();
+
+    const sanitizeBoard = (b, keepIds) => ({
+      id: keepIds && b.id ? b.id : this.uid(),
+      name: typeof b.name === "string" && b.name.trim() ? b.name : "Untitled",
+      bookmarks: Array.isArray(b.bookmarks)
+        ? b.bookmarks
+            .filter((bm) => bm && typeof bm.url === "string")
+            .map((bm) => ({
+              id: keepIds && bm.id ? bm.id : this.uid(),
+              title: typeof bm.title === "string" && bm.title.trim() ? bm.title : bm.url,
+              url: bm.url,
+            }))
+        : [],
+    });
+
+    if (mode === "replace") {
+      data.boards = parsed.boards.map((b) => sanitizeBoard(b, true));
+      await this.setData(data);
+      if (parsed.settings) {
+        await this.setSettings({ ...this.DEFAULT_SETTINGS, ...parsed.settings });
+      }
+    } else {
+      const imported = parsed.boards.map((b) => sanitizeBoard(b, false));
+      data.boards = data.boards.concat(imported);
+      await this.setData(data);
+    }
+  },
+
   uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   },
@@ -112,6 +227,22 @@ const Store = {
     const b = data.boards.find((x) => x.id === boardId);
     if (!b) return;
     b.bookmarks.push({ id: this.uid(), title: title || url, url });
+    await this.setData(data);
+  },
+
+  async moveBookmarkToPosition(fromBoardId, toBoardId, bookmarkId, toIndex) {
+    const data = await this.getData();
+    const from = data.boards.find((x) => x.id === fromBoardId);
+    const to = data.boards.find((x) => x.id === toBoardId);
+    if (!from || !to) return;
+    const idx = from.bookmarks.findIndex((x) => x.id === bookmarkId);
+    if (idx === -1) return;
+    const [bm] = from.bookmarks.splice(idx, 1);
+    let insertIndex = toIndex;
+    if (from === to && idx < insertIndex) insertIndex -= 1; // account for the shift caused by removal
+    if (insertIndex < 0) insertIndex = 0;
+    if (insertIndex > to.bookmarks.length) insertIndex = to.bookmarks.length;
+    to.bookmarks.splice(insertIndex, 0, bm);
     await this.setData(data);
   },
 

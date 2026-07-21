@@ -117,6 +117,34 @@ function render() {
       row.addEventListener("dragstart", () => {
         dragBookmark = { boardId: board.id, bookmarkId: bm.id };
       });
+      row.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!dragBookmark || dragBookmark.bookmarkId === bm.id) return;
+        const rect = row.getBoundingClientRect();
+        const before = e.clientY - rect.top < rect.height / 2;
+        row.classList.toggle("drop-above", before);
+        row.classList.toggle("drop-below", !before);
+      });
+      row.addEventListener("dragleave", () => {
+        row.classList.remove("drop-above", "drop-below");
+      });
+      row.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const before = row.classList.contains("drop-above");
+        row.classList.remove("drop-above", "drop-below");
+        if (!dragBookmark || dragBookmark.bookmarkId === bm.id) return;
+        const targetIdx = board.bookmarks.findIndex((x) => x.id === bm.id);
+        const insertIndex = targetIdx === -1 ? board.bookmarks.length : before ? targetIdx : targetIdx + 1;
+        const { boardId: fromBoardId, bookmarkId } = dragBookmark;
+        dragBookmark = null;
+        await Store.moveBookmarkToPosition(fromBoardId, board.id, bookmarkId, insertIndex);
+        refresh();
+      });
+      row.addEventListener("dragend", () => {
+        row.classList.remove("drop-above", "drop-below");
+      });
 
       const icon = document.createElement("img");
       icon.src = Store.faviconFor(bm.url);
@@ -250,8 +278,13 @@ const settingsOverlay = document.getElementById("settingsOverlay");
 const accentSwatchesEl = document.getElementById("accentSwatches");
 const wallpaperSwatchesEl = document.getElementById("wallpaperSwatches");
 const accentCustomEl = document.getElementById("accentCustom");
+const syncToggleEl = document.getElementById("syncToggle");
 
 function renderSettingsModal() {
+  Store.isSyncEnabled().then((enabled) => {
+    syncToggleEl.checked = enabled;
+  });
+
   accentSwatchesEl.innerHTML = "";
   for (const color of ACCENT_PRESETS) {
     const sw = document.createElement("div");
@@ -310,6 +343,19 @@ accentCustomEl.addEventListener("input", async () => {
   renderSettingsModal();
 });
 
+syncToggleEl.addEventListener("change", async () => {
+  const wantEnabled = syncToggleEl.checked;
+  syncToggleEl.disabled = true;
+  const result = await Store.setSyncEnabled(wantEnabled);
+  syncToggleEl.disabled = false;
+  if (!result.ok) {
+    syncToggleEl.checked = !wantEnabled;
+    alert(result.error);
+    return;
+  }
+  await refresh();
+});
+
 document.getElementById("settingsBtn").addEventListener("click", () => {
   renderSettingsModal();
   settingsOverlay.classList.remove("hidden");
@@ -335,6 +381,100 @@ document.getElementById("wallpaperFile").addEventListener("change", (e) => {
 });
 document.getElementById("clearWallpaperBtn").addEventListener("click", () => {
   applyWallpaper({ type: "none", value: "" });
+});
+
+// ---------- Export / restore JSON backup ----------
+document.getElementById("exportBtn").addEventListener("click", async () => {
+  const payload = await Store.exportAll();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const date = new Date().toISOString().slice(0, 10);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `boardmarks-backup-${date}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+const importJsonOverlay = document.getElementById("importJsonOverlay");
+const importJsonSummary = document.getElementById("importJsonSummary");
+let pendingImport = null;
+
+document.getElementById("importJsonBtn").addEventListener("click", () => {
+  document.getElementById("importJsonFile").click();
+});
+
+document.getElementById("importJsonFile").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(reader.result);
+    } catch {
+      alert("That file isn't valid JSON.");
+      return;
+    }
+    if (!parsed || !Array.isArray(parsed.boards)) {
+      alert("This doesn't look like a Boardmarks backup file.");
+      return;
+    }
+    pendingImport = parsed;
+    const boardCount = parsed.boards.length;
+    const bmCount = parsed.boards.reduce((n, b) => n + (Array.isArray(b.bookmarks) ? b.bookmarks.length : 0), 0);
+    importJsonSummary.textContent = `Found ${boardCount} board${boardCount === 1 ? "" : "s"} with ${bmCount} bookmark${bmCount === 1 ? "" : "s"} in this file. How would you like to restore it?`;
+    importJsonOverlay.classList.remove("hidden");
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById("importJsonMerge").addEventListener("click", async () => {
+  if (!pendingImport) return;
+  await Store.importAll(pendingImport, "merge");
+  pendingImport = null;
+  importJsonOverlay.classList.add("hidden");
+  refresh();
+});
+
+document.getElementById("importJsonReplace").addEventListener("click", async () => {
+  if (!pendingImport) return;
+  if (!confirm("This will delete all current boards and replace them with the backup. Continue?")) return;
+  await Store.importAll(pendingImport, "replace");
+  pendingImport = null;
+  importJsonOverlay.classList.add("hidden");
+  loadTheme();
+  refresh();
+});
+
+document.getElementById("importJsonCancel").addEventListener("click", () => {
+  pendingImport = null;
+  importJsonOverlay.classList.add("hidden");
+});
+
+// Keep this tab live: if boards change from another tab, another device
+// (via Chrome sync), or the sync/local switch itself, reload the view.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (!changes.boardmarks) return;
+  Store.getMeta().then((meta) => {
+    const activeArea = meta.syncEnabled ? "sync" : "local";
+    if (areaName === activeArea) refresh();
+  });
+});
+
+// A sync write can fail if it exceeds Chrome's sync quota. Store.setData
+// already saves the change locally as a fallback and turns sync off — this
+// just lets the person know what happened instead of failing silently.
+window.addEventListener("unhandledrejection", (e) => {
+  if (e.reason && e.reason.code === "SYNC_QUOTA_EXCEEDED") {
+    e.preventDefault();
+    alert(e.reason.message);
+    if (!settingsOverlay.classList.contains("hidden")) renderSettingsModal();
+    refresh();
+  }
 });
 
 loadTheme();
