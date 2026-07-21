@@ -268,7 +268,7 @@ const Store = {
       body.classList.remove("has-wallpaper");
     } else if (wp.type === "live") {
       body.style.backgroundImage = "";
-      body.style.backgroundColor = "transparent";
+      body.style.backgroundColor = "";
       body.classList.add("has-wallpaper");
     } else if (wp.type === "color") {
       body.style.backgroundImage = "";
