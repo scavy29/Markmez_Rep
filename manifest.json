@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Boardmarks",
-  "version": "1.0.2",
+  "version": "1.0.0",
   "description": "Organize your bookmarks into visual boards, right from your new tab.",
   "permissions": ["storage", "unlimitedStorage", "bookmarks", "tabs", "activeTab"],
   "chrome_url_overrides": {
