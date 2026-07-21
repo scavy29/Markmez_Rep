@@ -1,4 +1,5 @@
 let currentData = { boards: [] };
+let currentThumbnails = {};
 let searchTerm = "";
 let dragBookmark = null; // { boardId, bookmarkId }
 let dragBoardId = null; // id of the board currently being dragged for reordering
@@ -11,6 +12,7 @@ let currentSettings = null;
 
 async function refresh() {
   currentData = await Store.getData();
+  currentThumbnails = await Store.getThumbnails();
   render();
 }
 
@@ -146,9 +148,19 @@ function render() {
         row.classList.remove("drop-above", "drop-below");
       });
 
+      const thumb = document.createElement("div");
+      thumb.className = "bm-thumb";
+      const shot = currentThumbnails[bm.id];
       const icon = document.createElement("img");
-      icon.src = Store.faviconFor(bm.url);
+      if (shot) {
+        icon.className = "bm-thumb-shot";
+        icon.src = shot;
+      } else {
+        icon.className = "bm-thumb-favicon";
+        icon.src = Store.faviconFor(bm.url);
+      }
       icon.alt = "";
+      thumb.appendChild(icon);
 
       const label = document.createElement("span");
       label.textContent = bm.title;
@@ -163,7 +175,7 @@ function render() {
         refresh();
       });
 
-      row.appendChild(icon);
+      row.appendChild(thumb);
       row.appendChild(label);
       row.appendChild(removeBtn);
       list.appendChild(row);

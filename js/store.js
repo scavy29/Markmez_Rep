@@ -94,6 +94,42 @@ const Store = {
     }
   },
 
+  // Thumbnails are screenshots (data URLs), which can be large — they always
+  // live in local storage only, never in sync, so they can't blow the tiny
+  // Chrome sync quota. Keyed by bookmark id.
+  THUMB_KEY: "boardmarksThumbnails",
+
+  async getThumbnails() {
+    const res = await chrome.storage.local.get(this.THUMB_KEY);
+    return res[this.THUMB_KEY] || {};
+  },
+
+  async setThumbnail(bookmarkId, dataUrl) {
+    const thumbs = await this.getThumbnails();
+    thumbs[bookmarkId] = dataUrl;
+    await chrome.storage.local.set({ [this.THUMB_KEY]: thumbs });
+  },
+
+  async deleteThumbnail(bookmarkId) {
+    const thumbs = await this.getThumbnails();
+    if (bookmarkId in thumbs) {
+      delete thumbs[bookmarkId];
+      await chrome.storage.local.set({ [this.THUMB_KEY]: thumbs });
+    }
+  },
+
+  async deleteThumbnails(bookmarkIds) {
+    const thumbs = await this.getThumbnails();
+    let changed = false;
+    for (const id of bookmarkIds) {
+      if (id in thumbs) {
+        delete thumbs[id];
+        changed = true;
+      }
+    }
+    if (changed) await chrome.storage.local.set({ [this.THUMB_KEY]: thumbs });
+  },
+
   DEFAULT_SETTINGS: {
     accent: "#6d6af7",
     wallpaper: { type: "none", value: "" }, // type: none | color | gradient | image
@@ -142,12 +178,14 @@ const Store = {
   async exportAll() {
     const data = await this.getData();
     const settings = await this.getSettings();
+    const thumbnails = await this.getThumbnails();
     return {
       app: "boardmarks",
       version: 1,
       exportedAt: new Date().toISOString(),
       boards: data.boards,
       settings,
+      thumbnails,
     };
   },
 
@@ -158,6 +196,7 @@ const Store = {
       throw new Error("This doesn't look like a Boardmarks backup file.");
     }
     const data = await this.getData();
+    const idMap = {}; // old bookmark id -> new bookmark id (only used when ids are regenerated)
 
     const sanitizeBoard = (b, keepIds) => ({
       id: keepIds && b.id ? b.id : this.uid(),
@@ -165,13 +204,19 @@ const Store = {
       bookmarks: Array.isArray(b.bookmarks)
         ? b.bookmarks
             .filter((bm) => bm && typeof bm.url === "string")
-            .map((bm) => ({
-              id: keepIds && bm.id ? bm.id : this.uid(),
-              title: typeof bm.title === "string" && bm.title.trim() ? bm.title : bm.url,
-              url: bm.url,
-            }))
+            .map((bm) => {
+              const newId = keepIds && bm.id ? bm.id : this.uid();
+              if (bm.id && newId !== bm.id) idMap[bm.id] = newId;
+              return {
+                id: newId,
+                title: typeof bm.title === "string" && bm.title.trim() ? bm.title : bm.url,
+                url: bm.url,
+              };
+            })
         : [],
     });
+
+    const importedThumbs = parsed.thumbnails && typeof parsed.thumbnails === "object" ? parsed.thumbnails : {};
 
     if (mode === "replace") {
       data.boards = parsed.boards.map((b) => sanitizeBoard(b, true));
@@ -179,10 +224,25 @@ const Store = {
       if (parsed.settings) {
         await this.setSettings({ ...this.DEFAULT_SETTINGS, ...parsed.settings });
       }
+      // Replace wipes existing boards entirely, so drop any thumbnails that
+      // no longer correspond to a bookmark rather than leaving orphans.
+      const validIds = new Set(data.boards.flatMap((b) => b.bookmarks.map((bm) => bm.id)));
+      const nextThumbs = {};
+      for (const [id, url] of Object.entries(importedThumbs)) {
+        if (validIds.has(id)) nextThumbs[id] = url;
+      }
+      await chrome.storage.local.set({ [this.THUMB_KEY]: nextThumbs });
     } else {
       const imported = parsed.boards.map((b) => sanitizeBoard(b, false));
       data.boards = data.boards.concat(imported);
       await this.setData(data);
+      // Carry thumbnails over under their newly-generated bookmark ids.
+      const existingThumbs = await this.getThumbnails();
+      for (const [oldId, url] of Object.entries(importedThumbs)) {
+        const newId = idMap[oldId];
+        if (newId) existingThumbs[newId] = url;
+      }
+      await chrome.storage.local.set({ [this.THUMB_KEY]: existingThumbs });
     }
   },
 
@@ -218,16 +278,20 @@ const Store = {
 
   async deleteBoard(boardId) {
     const data = await this.getData();
+    const board = data.boards.find((x) => x.id === boardId);
     data.boards = data.boards.filter((x) => x.id !== boardId);
     await this.setData(data);
+    if (board) await this.deleteThumbnails(board.bookmarks.map((bm) => bm.id));
   },
 
   async addBookmark(boardId, { title, url }) {
     const data = await this.getData();
     const b = data.boards.find((x) => x.id === boardId);
-    if (!b) return;
-    b.bookmarks.push({ id: this.uid(), title: title || url, url });
+    if (!b) return null;
+    const bookmark = { id: this.uid(), title: title || url, url };
+    b.bookmarks.push(bookmark);
     await this.setData(data);
+    return bookmark;
   },
 
   async moveBookmarkToPosition(fromBoardId, toBoardId, bookmarkId, toIndex) {
@@ -252,6 +316,7 @@ const Store = {
     if (!b) return;
     b.bookmarks = b.bookmarks.filter((x) => x.id !== bookmarkId);
     await this.setData(data);
+    await this.deleteThumbnail(bookmarkId);
   },
 
   async moveBookmark(fromBoardId, toBoardId, bookmarkId) {

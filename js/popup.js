@@ -29,6 +29,24 @@ async function init() {
   }
 }
 
+function downscaleImage(dataUrl, maxWidth, maxHeight, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
 document.getElementById("saveBtn").addEventListener("click", async () => {
   const status = document.getElementById("status");
   const select = document.getElementById("boardSelect");
@@ -40,12 +58,24 @@ document.getElementById("saveBtn").addEventListener("click", async () => {
     boardId = board.id;
   }
 
-  await Store.addBookmark(boardId, {
+  const bookmark = await Store.addBookmark(boardId, {
     title: activeTab.title || activeTab.url,
     url: activeTab.url,
   });
 
   status.textContent = "Saved ✓";
+
+  // Best-effort screenshot: some pages (chrome:// pages, the PDF viewer,
+  // the Web Store, etc.) can't be captured — that's fine, we just fall
+  // back to the favicon for those.
+  try {
+    const rawShot = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: "jpeg", quality: 70 });
+    const thumb = await downscaleImage(rawShot, 320, 200, 0.6);
+    if (bookmark) await Store.setThumbnail(bookmark.id, thumb);
+  } catch (err) {
+    /* no thumbnail for this tab — favicon will be shown instead */
+  }
+
   setTimeout(() => window.close(), 500);
 });
 

@@ -11,6 +11,13 @@ saving the current tab.
 - **Drag & drop**: reorder bookmarks within a board, or drag one onto another
   board to move it there
 - **Quick save**: click the toolbar icon to save the current tab to any board
+- **Thumbnails**: bookmarks saved via the toolbar popup get a real screenshot
+  of the tab at the moment you save it (captured locally, never sent
+  anywhere). Bookmarks added by pasting a URL or importing from Chrome show
+  a favicon instead, since there's no live tab to screenshot for those.
+  Thumbnails are stored locally only (excluded from sync, cleaned up
+  automatically when a bookmark or board is deleted, and carried along in
+  export/restore backups).
 - **Theme & wallpaper** (⚙ button): pick an accent color (presets or a custom
   swatch) and a wallpaper — gradient presets, a solid color, or upload your
   own image. Boards get a frosted-glass look automatically when a wallpaper
@@ -41,7 +48,6 @@ saving the current tab.
    toolbar for the quick-save popup.
 
 ## Ideas for more
-- Bookmark thumbnails/screenshots instead of favicons
 - Keyboard shortcuts (e.g. a hotkey to open the quick-add row)
 - Multiple named "spaces" of boards you can switch between
 
